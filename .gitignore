@@ -1,0 +1,32 @@
+# 敏感/产物, 切勿提交
+.env
+cookies.txt
+cookies.txt.*.bak
+cookies.good.bak
+
+# Python 缓存
+__pycache__/
+*.pyc
+
+# 运行日志 / 探针
+*.log
+.cron_probe
+
+# macOS 元数据
+.DS_Store
+
+# 调试产物(文章发布诊断)
+article_debug.html
+article_debug.txt
+article_resp.txt
+article_whitebox.png
+data/_debug/
+
+# 拆页产物(运行时生成)
+data/assets/_pages/
+
+# 本地备份目录
+clock_backup_*/
+
+# WorkBuddy 工具内部数据(账号/服务器/记忆等非源码, 切勿提交)
+.workbuddy/
