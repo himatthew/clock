@@ -186,9 +186,20 @@ def main():
 
     res_label = build_resource_label(args.resources)
 
-    # 标题限 8 字, 只放精简状态标 (任一分区分成功即视为整体有成功)
-    title = args.title or ("毛毛小主下发完毕"
-                           if (cookie_ok and (upload_ok or topic_ok or activity_ok or article_ok))
+    # 整体成功判定: 所有展示分区状态都为成功
+    shown_oks = [cookie_ok]
+    if not args.resource_only and not args.no_resource:
+        shown_oks.append(upload_ok)
+    if not args.resource_only and not args.no_topic:
+        shown_oks.append(topic_ok)
+    if not args.resource_only and not args.no_activity:
+        shown_oks.append(activity_ok)
+    if not args.resource_only and not args.no_article:
+        shown_oks.append(article_ok)
+    overall_ok = all(shown_oks)
+
+    # 标题与整体成功判定一致: 任一分区分失败即整体失败标题(失败不再报"下发完毕"误导)
+    title = args.title or ("毛毛小主下发完毕" if overall_ok
                            else "警告！推送失败，请小主排查")
 
     # 构造状态行: --resource-only 仅 Cookie/资源(隐藏其余); 各 --no-* 单独隐藏对应行
@@ -203,18 +214,6 @@ def main():
             rows.append(desc_row("教研参与", status_tag(args.activity_status, activity_ok)))
         if not args.no_article:
             rows.append(desc_row("文章发布", status_tag(args.article_status, article_ok)))
-
-    # 整体成功判定: 所有展示分区状态都为成功
-    shown_oks = [cookie_ok]
-    if not args.resource_only and not args.no_resource:
-        shown_oks.append(upload_ok)
-    if not args.resource_only and not args.no_topic:
-        shown_oks.append(topic_ok)
-    if not args.resource_only and not args.no_activity:
-        shown_oks.append(activity_ok)
-    if not args.resource_only and not args.no_article:
-        shown_oks.append(article_ok)
-    overall_ok = all(shown_oks)
 
     # 正文主文案
     if args.headline:

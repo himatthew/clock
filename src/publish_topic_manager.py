@@ -1,12 +1,15 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""之江汇名师工作室(ms.zjer.cn) —— 话题发布 + 置顶/加精 管理
+"""之江汇名师工作室(ms.zjer.cn) —— 话题批量发布 + 置顶/加精 管理
 流程:
-  1. 读 topics_config.json, 按 date==今天 匹配, fallback default, 取 title/content
-  2. Playwright 发布话题, 取新 id
-  3. 找出「洪彦」名下【置顶+加精】旧话题, 批量撤顶+取消加精
-  4. 新话题置顶+加精
+  1. 读 topics_config.json, 按 date==今天 匹配(支持当天多条, 即每日批量发布)
+  2. 对每条做质量校验(标题/正文长度、领域相关性), 不合格跳过
+  3. 逐条 Playwright 发布, 收集新 id
+  4. 只把最后一条置顶+加精, 撤掉洪彦名下其他置顶话题
 Cookie 由 run_daily.sh 第一步 refresh_cookie.py 维护(本脚本只读 cookies.txt)。
+
+话题内容由 AI 在本地(WorkBuddy)预先生成并落库到 topics_config.json,
+运行时不再调用大模型, 仅按计划批量发布, 保证稳定与可控。
 """
 import os, re, sys, json, datetime
 from playwright.sync_api import sync_playwright
@@ -21,6 +24,15 @@ CONFIG = {
     "HONGYAN_NAME": "洪彦",
     "UA": "Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36",
 }
+
+# 领域关键词(音乐/教育/教学三类), 用于生成内容的质量兜底校验
+DOMAIN_WORDS = [
+    "音乐", "教育", "教学", "学生", "课堂", "小学", "老师", "教师", "孩子", "班级", "家长", "作业",
+    "唱歌", "歌唱", "节奏", "乐器", "合唱", "欣赏", "柯达伊", "奥尔夫", "达尔克罗兹", "体态律动",
+    "识谱", "旋律", "民歌", "戏曲", "创作", "聆听", "演唱", "发声", "音准", "多声部", "游戏",
+    "情境", "项目式", "跨学科", "评价", "绘本", "技术", "AI", "数字化", "素养", "课程",
+    "教案", "教研", "成长", "公开课", "合作", "学习",
+]
 
 
 def load_cookies(path):
@@ -43,16 +55,34 @@ def today_str():
 
 
 def load_topic_config():
+    """返回当天所有匹配话题 [(title, content), ...]; 无则 fallback default(单条)。"""
     with open(CONFIG["TOPICS_CONFIG"], encoding="utf-8") as f:
         cfg = json.load(f)
     dk = today_str()
-    for it in cfg.get("topics", []):
-        if it.get("date") == dk:
-            return it["title"], it["content"]
+    items = [(it["title"], it["content"]) for it in cfg.get("topics", [])
+             if it.get("date") == dk]
+    if items:
+        return items
     d = cfg.get("default")
     if d:
-        return d["title"], d["content"]
+        return [(d["title"], d["content"])]
     raise SystemExit(f"配置里无 {dk} 的话题, 也无 default")
+
+
+def validate_topic(title, content):
+    """质量校验: 非空、长度合理、命中领域词、非模板雷同。返回 (ok, reason)。"""
+    if not title or not content:
+        return False, "标题或正文为空"
+    if not (4 <= len(title) <= 40):
+        return False, f"标题长度异常({len(title)})"
+    if not (30 <= len(content) <= 600):
+        return False, f"正文长度异常({len(content)})"
+    hit = sum(1 for w in DOMAIN_WORDS if w in title + content)
+    if hit < 2:
+        return False, f"领域相关性不足(命中{hit})"
+    if content.strip() == title.strip():
+        return False, "正文与标题雷同"
+    return True, "ok"
 
 
 def new_session(cookies):
@@ -164,39 +194,54 @@ def manage_action(s, csrf, ids, action):
 
 
 def main():
-    title, content = load_topic_config()
-    print(f"[话题] {today_str()}: {title}")
+    items = load_topic_config()
+    print(f"[话题] {today_str()}: 当日待发布 {len(items)} 个")
     cookies = load_cookies(CONFIG["COOKIES_FILE"])
     s = new_session(cookies)
     csrf = get_csrf(s)
     if not csrf:
         print("[CSRF] ❌ 未获取到, 中止")
         sys.exit(1)
-    new_id = publish_topic_playwright(title, content)
-    if not new_id:
-        print("[话题] ⚠️ URL 未取到 id, 用标题回查")
-        r = s.get(f"{CONFIG['BASE']}/index.php?r=studio/topic/index&sid={CONFIG['SID']}", timeout=30)
-        m = re.search(r'(?:&|\?)id=(\d+)[^>]*>' + re.escape(title), r.text)
-        new_id = m.group(1) if m else None
-    if not new_id:
-        print("[话题] ❌ 无法定位新话题, 跳过置顶管理")
+    new_ids = []
+    for i, (title, content) in enumerate(items, 1):
+        ok, why = validate_topic(title, content)
+        if not ok:
+            print(f"[话题] ⚠️ 第{i}条质量不达标({why}), 跳过: {title}")
+            continue
+        print(f"[话题] ({i}/{len(items)}) {title}")
+        new_id = publish_topic_playwright(title, content)
+        if not new_id:
+            print(f"[话题] ⚠️ 第{i}条 URL 未取到 id, 用标题回查")
+            r = s.get(f"{CONFIG['BASE']}/index.php?r=studio/topic/index&sid={CONFIG['SID']}", timeout=30)
+            m = re.search(r'(?:&|\?)id=(\d+)[^>]*>' + re.escape(title), r.text)
+            new_id = m.group(1) if m else None
+        if new_id:
+            new_ids.append(new_id)
+            print(f"[话题] ✅ 第{i}条 新话题 id={new_id}")
+        else:
+            print(f"[话题] ❌ 第{i}条 无法定位, 跳过")
+    if not new_ids:
+        print("[话题] ❌ 无成功发布的话题, 跳过置顶管理")
         sys.exit(1)
-    print(f"[话题] ✅ 新话题 id={new_id}")
+    # 只置顶+加精最后一条, 撤掉洪彦其他置顶话题(保持工作室置顶位整洁)
+    to_top = new_ids[-1]
+    print(f"[话题] 置顶管理: 仅置顶最后一条 id={to_top}, 其余洪彦置顶话题将撤顶")
     topped = get_topped_ids(s)
     authors = get_authors(s)
     hongyan_topped = [t for t in topped if authors.get(t) == CONFIG["HONGYAN_NAME"]]
-    print(f"[话题] 置顶+加精共 {len(topped)}, 洪彦的: {hongyan_topped}")
-    old = [t for t in hongyan_topped if t != new_id]
+    old = [t for t in hongyan_topped if t != to_top]
     if old:
         print(f"[话题] 撤顶+取消加精 旧: {old}")
         print("  撤顶:", manage_action(s, csrf, old, "untop"))
         print("  取消加精:", manage_action(s, csrf, old, "unessence"))
     else:
-        print("[话题] 洪彦无旧置顶话题, 跳过")
-    print(f"[话题] 置顶+加精 新 {new_id}")
-    print("  置顶:", manage_action(s, csrf, [new_id], "top"))
-    print("  加精:", manage_action(s, csrf, [new_id], "essence"))
+        print("[话题] 洪彦无其它置顶话题, 跳过撤顶")
+    print(f"[话题] 置顶+加精 {to_top}")
+    print("  置顶:", manage_action(s, csrf, [to_top], "top"))
+    print("  加精:", manage_action(s, csrf, [to_top], "essence"))
     print("[话题] ✅ 完成")
+    failed = len(items) - len(new_ids)
+    sys.exit(1 if failed > 0 else 0)
 
 
 if __name__ == "__main__":

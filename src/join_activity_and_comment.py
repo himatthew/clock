@@ -169,7 +169,7 @@ def run(count=5, dry_run=False, aid=None):
             if not target_aid:
                 print("[教研参与] 未找到未开始且未加入的活动, 结束")
                 browser.close()
-                return
+                return None  # 无任务
         print(f"[教研参与] 目标活动 aid={target_aid} 《{target_title}》")
         if dry_run:
             chosen = random.sample(messages, count)
@@ -177,7 +177,7 @@ def run(count=5, dry_run=False, aid=None):
             for i, m in enumerate(chosen, 1):
                 print(f"   {i}. {m}")
             browser.close()
-            return
+            return (0, 0, True)  # dry-run 视为成功
         if not aid:
             page.goto(f"{CONFIG['BASE']}/index.php?r=studio/activies/activiesdetail&sid={CONFIG['SID']}&aid={target_aid}",
                       wait_until="networkidle", timeout=60000)
@@ -202,6 +202,7 @@ def run(count=5, dry_run=False, aid=None):
                 print(f"   ❌ {m[:30]}...")
         print(f"[完成] aid={target_aid} 参与+留言结束, 成功 {ok_count}/{len(chosen)}")
         browser.close()
+        return (ok_count, len(chosen), True)
 
 
 if __name__ == "__main__":
@@ -210,4 +211,9 @@ if __name__ == "__main__":
     ap.add_argument("--dry-run", action="store_true", help="只预览不操作")
     ap.add_argument("--aid", default=None, help="指定活动 aid")
     args = ap.parse_args()
-    run(count=args.count, dry_run=args.dry_run, aid=args.aid)
+    res = run(count=args.count, dry_run=args.dry_run, aid=args.aid)
+    # 退出码: 无未参与活动(None)=0; 有活动但留言未全部成功=1; 全部成功=0
+    if res is None:
+        sys.exit(0)
+    ok_count, total, _ = res
+    sys.exit(0 if ok_count == total else 1)

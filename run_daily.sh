@@ -2,7 +2,7 @@
 # 之江汇教育广场 每日自动发布 (陈晓雯名师工作室 sid=2174, 账号 洪彦)
 # 步骤:
 #   1) playwright(cube 云管理台登录)刷新 cookies.txt, 拿到 ck_ms + eduyun_sessionid
-#   2) 发布当天话题 + 旧话题撤顶取消加精 + 新话题置顶加精
+#   2) 批量发布当天话题(每日两个, 覆盖音乐/教育/教学) + 旧话题撤顶取消加精 + 仅最新一条置顶加精
 #   3) 参与最新一个未加入教研活动 + 提问研讨留 5 条言
 #   4) 微信推送(PushPlus, 四态汇总; 成败都推)
 # 注意: 资源上传已由独立的 split_upload_daily.sh (每天 07:30) 负责「拆页批量上传」, 此处不再上传。
@@ -22,7 +22,8 @@ log() { echo "[$(ts)] $*"; }
 cd "$APP" || { echo "[$(ts)] ERROR: cd $APP 失败"; exit 1; }
 
 # 确保 cookie 有效: 失效才刷新(避免频繁刷新触发账号风控)。
-# 默认基础检测(ck_ms 登录态); 传 --strict 时额外检测文章发布页权限。
+# 基础 --check 只验 ck_ms 会漏判 eduyun_sessionid 会话过期 -> 话题/教研页打不开(静默失败)。
+# 话题/教研/文章/资源发布页均需新鲜 eduyun_sessionid 会话, 故与另两脚本一致用 --strict 守卫。
 ensure_cookie() {
     local strict_flag="${1:-}"
     log "[cookie] 检测有效性 (refresh_cookie.py --check $strict_flag) ..."
@@ -47,14 +48,14 @@ fi
 
 log "=== 每日任务开始 ==="
 
-# 1) 确保 cookie 有效(失效才刷新)
-log "[1/4] 确保 cookie 有效(失效才刷新) ..."
-ensure_cookie ""
+# 1) 确保 cookie 有效(失效才刷新): 话题/教研页需 eduyun_sessionid 新鲜会话, 故用 --strict 守卫
+log "[1/4] 确保 cookie 有效(失效才刷新, --strict) ..."
+ensure_cookie "--strict"
 CK_EXIT=$?
 log "      cookie exit=$CK_EXIT"
 
 # 2) 发布当天话题 + 旧话题撤顶取消加精 + 新话题置顶加精
-log "[2/4] 发布话题+置顶加精 (publish_topic_manager.py) ..."
+log "[2/4] 批量发布当天话题+仅置顶最新 (publish_topic_manager.py) ..."
 env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
     "$PY" src/publish_topic_manager.py >> "$LOG" 2>&1
 TK_EXIT=$?
