@@ -70,8 +70,11 @@ else
     HEADLINE="失败～毛毛小主 文章发布失败"
 fi
 
-# 2.1) 从日志提取本批每篇文章的标题+状态(两篇), 上送通知显式列出(而非只靠 tail 截断)
-ARTS="$(grep -aE '^[0-9]+\|(OK|FAIL)\|' "$LOG" | tail -n 10)"
+# 2.1) 从日志提取「本次运行」每篇文章的标题+状态(两篇), 上送通知显式列出。
+#     注意: 日志持续追加且从不截断, 若直接全文件 grep 会把历史日期的 1|OK|... 也捞进来,
+#     导致通知误列旧文章(逐日累积成 4/6/10 篇)。故限定在最后一个运行起始标记之后。
+START_LINE="$(grep -n '=== 文章发布任务开始 ===' "$LOG" | tail -1 | cut -d: -f1)"
+ARTS="$(tail -n "+${START_LINE:-1}" "$LOG" | grep -aE '^[0-9]+\|(OK|FAIL)\|' | tail -n 10)"
 ARTICLES_ARG=""
 if [ -n "$ARTS" ]; then
     while IFS='|' read -r idx st title; do
