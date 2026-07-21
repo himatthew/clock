@@ -24,18 +24,24 @@ cd "$APP" || { echo "[$(ts)] ERROR: cd $APP 失败"; exit 1; }
 # 确保 cookie 有效: 失效才刷新(避免频繁刷新触发账号风控)。
 # 基础 --check 只验 ck_ms 会漏判 eduyun_sessionid 会话过期 -> 话题/教研页打不开(静默失败)。
 # 话题/教研/文章/资源发布页均需新鲜 eduyun_sessionid 会话, 故与另两脚本一致用 --strict 守卫。
+# 并发安全: 三任务并行启动时, 若 cookie 同时过期会并发刷新并互相覆盖 cookies.txt。
+# 用 flock 把「检测+刷新」整体串行化(第一个抢到锁的刷新, 其余等待后复检即跳过)。
+COOKIE_LOCK="$APP/.cookie_lock"
 ensure_cookie() {
     local strict_flag="${1:-}"
-    log "[cookie] 检测有效性 (refresh_cookie.py --check $strict_flag) ..."
-    if env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
-        "$PY" src/refresh_cookie.py --check $strict_flag >> "$LOG" 2>&1; then
-        log "[cookie] 仍有效, 跳过刷新"
-        return 0
-    fi
-    log "[cookie] 失效, 执行刷新 (--mode playwright) ..."
-    env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
-        "$PY" src/refresh_cookie.py --mode playwright >> "$LOG" 2>&1
-    return $?
+    (
+        flock -w 180 200 || { log "[cookie] 获取锁失败, 跳过刷新"; return 0; }
+        log "[cookie] 检测有效性 (refresh_cookie.py --check $strict_flag) ..."
+        if env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
+            "$PY" src/refresh_cookie.py --check $strict_flag >> "$LOG" 2>&1; then
+            log "[cookie] 仍有效, 跳过刷新"
+            return 0
+        fi
+        log "[cookie] 失效, 执行刷新 (--mode playwright) ..."
+        env -u HTTP_PROXY -u HTTPS_PROXY -u http_proxy -u https_proxy \
+            "$PY" src/refresh_cookie.py --mode playwright >> "$LOG" 2>&1
+        return $?
+    ) 200>"$COOKIE_LOCK"
 }
 
 # 启动日守卫: 未到 START_DATE 前不执行(避免部署当天提前触发)

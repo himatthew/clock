@@ -149,6 +149,9 @@ def main():
     ap.add_argument("--topic-status", default="未知", help="话题发布状态(成功/失败)")
     ap.add_argument("--activity-status", default="未知", help="教研参与状态(成功/失败)")
     ap.add_argument("--article-status", default="未知", help="文章发布状态(成功/失败)")
+    ap.add_argument("--articles", default="",
+                    help="当天各篇文章明细, 格式 '标题1:成功;标题2:失败', "
+                         "提供时通知将逐篇列出(而不是只显示一个汇总状态)")
     ap.add_argument("--no-article", action="store_true", help="隐藏 文章发布 行")
     ap.add_argument("--no-topic", action="store_true", help="隐藏 话题发布 行")
     ap.add_argument("--no-activity", action="store_true", help="隐藏 教研参与 行")
@@ -182,7 +185,22 @@ def main():
     upload_ok = sec_ok(args.upload_status)
     topic_ok = sec_ok(args.topic_status)
     activity_ok = sec_ok(args.activity_status)
-    article_ok = sec_ok(args.article_status)
+    # 文章发布: 若提供了逐篇明细(--articles), 则逐篇聚合; 否则沿用单一状态字符串(兼容旧调用)
+    article_list = []  # list of (title, ok)
+    if args.articles and args.articles.strip():
+        for part in args.articles.split(";"):
+            part = part.strip()
+            if not part:
+                continue
+            if ":" in part:
+                t, s = part.rsplit(":", 1)
+                article_list.append((t.strip(), "成功" in s))
+            else:
+                article_list.append((part, False))
+    if article_list:
+        article_ok = all(ok for _, ok in article_list)
+    else:
+        article_ok = sec_ok(args.article_status)
 
     res_label = build_resource_label(args.resources)
 
@@ -213,7 +231,21 @@ def main():
         if not args.no_activity:
             rows.append(desc_row("教研参与", status_tag(args.activity_status, activity_ok)))
         if not args.no_article:
-            rows.append(desc_row("文章发布", status_tag(args.article_status, article_ok)))
+            if article_list:
+                rows.append(desc_row(
+                    "文章发布",
+                    status_tag(f"成功 ({len(article_list)}篇)" if article_ok
+                               else "部分失败", article_ok)))
+                for idx, (t, ok) in enumerate(article_list, 1):
+                    rows.append(
+                        f'<div style="display:flex;justify-content:space-between;'
+                        f'align-items:center;padding:6px 0 6px 16px;'
+                        f'border-bottom:1px solid {C_BORDER_2};font-size:13px;">'
+                        f'<span style="color:{C_TEXT_2};">📄 {idx}. {escape_html(t)}</span>'
+                        f'<span style="color:{C_TEXT};">'
+                        f'{status_tag("成功" if ok else "失败", ok)}</span></div>')
+            else:
+                rows.append(desc_row("文章发布", status_tag(args.article_status, article_ok)))
 
     # 正文主文案
     if args.headline:

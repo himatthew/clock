@@ -328,6 +328,22 @@ def publish_one(page, path, mode, dialogs, idx, total):
     return 0 if ok else 1
 
 
+def _print_summary(results):
+    """打印机器可解析的发布结果汇总, 供 publish_article_daily.sh 提取上送通知。
+
+    格式(每行):  序号|OK|标题   或   序号|FAIL|标题
+    示例:
+        1|OK|雪绒花
+        2|FAIL|小星星
+    """
+    log("\n" + "=" * 32)
+    log("ARTICLE_SUMMARY_START")
+    for i, (t, ok) in enumerate(results, 1):
+        log(f"{i}|{'OK' if ok else 'FAIL'}|{t}")
+    log("ARTICLE_SUMMARY_END")
+    log("=" * 32)
+
+
 def publish(cookie_path, date, explicit, dry_run, mode):
     paths = find_article(date, explicit)
     total = len(paths)
@@ -340,6 +356,7 @@ def publish(cookie_path, date, explicit, dry_run, mode):
             log("──────────── 正文 ────────────")
             log(body)
             log("────────────────────────────\n")
+        log(f"[预览] 共 {total} 篇, 未实际发布")
         return 0
 
     cookie = open(cookie_path, encoding="utf-8").read().strip()
@@ -354,16 +371,22 @@ def publish(cookie_path, date, explicit, dry_run, mode):
         dialogs = []
         page.on("dialog", lambda d: (dialogs.append(d.message), d.accept()))
 
+        # 汇总当天每篇文章的发布结果(title, ok), 供调度脚本提取并上送通知
+        results = []  # list of (title, ok)
         rc = 0
         for i, path in enumerate(paths, 1):
             dialogs.clear()  # 每篇独立判断弹窗, 不清会影响下一篇 ok 判定
             r = publish_one(page, path, mode, dialogs, i, total)
+            atitle, _, _ = parse_article(path)
+            results.append((atitle, r == 0))
             if r == 2:
                 b.close()
+                _print_summary(results)
                 return 2
             if r != 0:
                 rc = r
         b.close()
+        _print_summary(results)
         return rc
 
 

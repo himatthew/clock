@@ -193,24 +193,34 @@ def main():
                 page.on("response", on_resp)
 
                 page.goto(args.url, wait_until="domcontentloaded", timeout=30000)
-                page.wait_for_timeout(3500)
+                page.wait_for_timeout(1500)
 
                 # ---- 1) 上传文件 (隐藏 iframe) ----
+                # 上传表单的隐藏 iframe(NAME=iframeName) 由页面 JS 异步注入,
+                # 偶发加载慢 -> "上传 iframe 未找到" 并级联后续点击超时(整篇失败)。
+                # 用 page.frame("iframeName") 轮询等待其就绪(与原始可用逻辑一致),
+                # 最多 ~20s; 注意: 该 iframe 以 name/id 注册, 必须走 page.frame() 才能稳定取到,
+                # 用 CSS 选择器 iframe[NAME=...] 反而不匹配 -> 全部误判失败。
+                # 仍缺失才抛错由外层标记失败(不再做无意义的后续点击)。
                 log("--- step1: 上传文件 ---")
-                frame = page.frame("iframeName")
+                frame = None
+                for _ in range(20):
+                    frame = page.frame("iframeName")
+                    if frame:
+                        break
+                    page.wait_for_timeout(1000)
                 if not frame:
-                    log("ERROR: 上传 iframe 未找到")
-                else:
-                    frame.wait_for_selector("#inp_fbtn", state="attached", timeout=10000)
-                    frame.set_input_files("#inp_fbtn", pptx)
-                    done = False
-                    for _ in range(60):
-                        vid = frame.evaluate("()=>document.querySelector('#attachFileId')?.value||''")
-                        if vid:
-                            log(f"上传完成: attachFileId={vid[:40]}"); done = True; break
-                        page.wait_for_timeout(1000)
-                    if not done:
-                        log("WARN: 60s 内上传未完成")
+                    raise RuntimeError("上传 iframe 未找到(轮询20s仍缺失), 中止本文件上传")
+                frame.wait_for_selector("#inp_fbtn", state="attached", timeout=10000)
+                frame.set_input_files("#inp_fbtn", pptx)
+                done = False
+                for _ in range(60):
+                    vid = frame.evaluate("()=>document.querySelector('#attachFileId')?.value||''")
+                    if vid:
+                        log(f"上传完成: attachFileId={vid[:40]}"); done = True; break
+                    page.wait_for_timeout(1000)
+                if not done:
+                    log("WARN: 60s 内上传未完成")
 
                 # ---- 2) 资源类型 课件 (hRadio, 必须点 label) ----
                 log("--- step2: 资源类型=课件 ---")
