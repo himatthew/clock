@@ -166,7 +166,7 @@ def main():
         if upload_ok:
             res_headline = f"万福，毛毛小主！{ok}个pdf已上传。"
         else:
-            res_headline = f"失败～毛毛小主 资源上传（成功 {ok} / 共 {total}）"
+            res_headline = f"资源上传（成功 {ok} / 共 {total}）"
         log("[*] 发送微信提醒(notify.py --resource-only) ...")
         nr = subprocess.run([
             sys.executable, os.path.join(HERE, "notify.py"), "--date", date,
