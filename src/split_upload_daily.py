@@ -9,7 +9,7 @@
 设计:
   * 拆页用纯 Python 的 pypdf(无需系统 poppler 依赖), 输出到
     assets/_pages/<日期>/<日期_曲名_P001>.pdf
-  * 上传复用已逐项验证的 publish_resource_playwright.py --pages-dir(单浏览器循环)
+  * 上传复用已逐项验证的 publish_resource_api.py --pages-dir(HTTP 直传 OSS, 彻底绕过页面 iframe 偶发未注入)
   * 每页文件名带 _P<NNN> 后缀 -> resolve_pdf_asset 用 stem 当标题, 各页独立命名
   * 用 --no-variant: 每页内容不同, 自然 MD5 不同; 同页重传会被服务端去重(type=2), 幂等不重复
   * 微信提醒走 notify.py --resource-only(只显示 工作室/Cookie/资源)
@@ -128,14 +128,14 @@ def main():
         log("[dry-run] 跳过上传与推送")
         sys.exit(0)
 
-    # 3) 批量上传(单浏览器循环, --no-variant 幂等)
+    # 3) 批量上传(API 直传模式, --no-variant 幂等; 绕过页面 iframe 偶发未注入)
     # cookie 相对路径按「项目根(HERE 的上级)」解析(脚本不 chdir, 始终以项目根为基准)
     cookie = args.cookie if os.path.isabs(args.cookie) \
         else os.path.join(os.path.dirname(HERE), args.cookie)
     if not os.path.exists(cookie) or os.path.getsize(cookie) == 0:
         log("[!] cookies.txt 缺失或为空, 上传很可能失败")
     pages_dir = os.path.join(ASSETS, "_pages", date)
-    cmd = [sys.executable, os.path.join(HERE, "publish_resource_playwright.py"), cookie,
+    cmd = [sys.executable, os.path.join(HERE, "publish_resource_api.py"), cookie,
            "--pages-dir", pages_dir, "--no-variant"]
     log(f"[*] 调用上传: {' '.join(cmd)}")
     p = subprocess.Popen(cmd, cwd=HERE, text=True,

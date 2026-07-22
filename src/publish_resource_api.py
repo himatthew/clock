@@ -176,15 +176,21 @@ def upload_one(src, fields, source, mode, cookie, args):
         fields["intro"] = title
 
     stem, ext = os.path.splitext(os.path.basename(src))
-    if mode == "pdf":
+    if args.no_variant:
+        # 用原文件直传, 靠服务端 MD5 去重实现幂等(与 playwright --no-variant 一致)
+        variant = src
+        log(f"使用原文件(不改 MD5, 服务端去重兜底): {variant}")
+    elif mode == "pdf":
         # 文件名已含日期(预处理改名), 变体保持同名写临时目录, 不污染 assets/
         variant = os.path.join(tempfile.gettempdir(), f"{stem}{ext}")
+        make_variant(src, variant)
+        log(f"生成去重变体(新MD5): {variant}")
     else:
         ts = time.strftime("%Y%m%d_%H%M%S")
         workdir = os.path.dirname(os.path.abspath(src)) or "."
         variant = os.path.join(workdir, f"{stem} api_{ts}{ext}")
-    make_variant(src, variant)
-    log(f"生成去重变体(新MD5): {variant}")
+        make_variant(src, variant)
+        log(f"生成去重变体(新MD5): {variant}")
     log(f"文件 MD5 = {md5_of(variant)}")
 
     session = requests.Session()
@@ -212,6 +218,10 @@ def main():
     ap.add_argument("--config", default=None, help="资源配置文件 (默认 resources_config.json)")
     ap.add_argument("--date", default=None, help="指定日期 YYYY-MM-DD 取资源 (默认当天)")
     ap.add_argument("--list", action="store_true", help="列出配置文件里全部资源后退出")
+    ap.add_argument("--pages-dir", default=None,
+                    help="拆页批量: 上传该目录下全部 PDF(每日拆页任务用, 替代 assets 整本)")
+    ap.add_argument("--no-variant", action="store_true",
+                    help="不上传去重变体, 用原文件(靠服务端 MD5 去重, 可幂等重跑)")
     ap.add_argument("--dry-run", action="store_true",
                     help="停在提交前, 只验证上传拿到 fid")
     args = ap.parse_args()
@@ -231,7 +241,21 @@ def main():
     # 构建上传目标列表 (src, fields, source, mode)
     targets = []
 
-    if args.file:
+    if args.pages_dir:
+        # 拆页批量: 上传目录下全部 PDF(每日拆页任务用, 优先于其它来源)
+        d = os.path.abspath(args.pages_dir)
+        if not os.path.isdir(d):
+            raise SystemExit(f"--pages-dir 不存在: {d}")
+        pdfs = sorted(f for f in os.listdir(d) if f.lower().endswith(".pdf"))
+        if not pdfs:
+            raise SystemExit(f"{d} 下没有 PDF 文件")
+        log(f"[*] --pages-dir 待上传 {len(pdfs)} 个:")
+        for f in pdfs:
+            fp = os.path.join(d, f)
+            fields, source = resolve_pdf_asset(fp, args.title, args.intro)
+            targets.append((fp, fields, source, "pdf"))
+            log(f"    {f}")
+    elif args.file:
         # 显式指定单个文件
         _p = os.path.abspath(args.file)
         is_pdf_asset = args.file.lower().endswith(".pdf") and \
