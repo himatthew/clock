@@ -203,14 +203,24 @@ def main():
                 # 用 CSS 选择器 iframe[NAME=...] 反而不匹配 -> 全部误判失败。
                 # 仍缺失才抛错由外层标记失败(不再做无意义的后续点击)。
                 log("--- step1: 上传文件 ---")
+                # iframe 由页面 JS 异步注入, 偶发「注入失败/过慢」: 轮询等待, 缺失则重载页面再试
+                # (至多 3 轮), 仍缺失才抛错由外层标记失败。step1 尚未填表, 此时重载安全。
+                # 注: 仅 20s 轮询只能覆盖「慢」, 覆盖不了「这次压根没注入」(如 P003/P011),
+                # 故加重载重试; 该 iframe 以 name/id 注册, 必须走 page.frame() 取(勿用 CSS 选择器)。
                 frame = None
-                for _ in range(20):
-                    frame = page.frame("iframeName")
+                for attempt in range(3):
+                    for _ in range(20):
+                        frame = page.frame("iframeName")
+                        if frame:
+                            break
+                        page.wait_for_timeout(1000)
                     if frame:
                         break
-                    page.wait_for_timeout(1000)
+                    log(f"上传 iframe 第 {attempt + 1} 轮 20s 未就绪, 重载页面重试 ...")
+                    page.reload(wait_until="domcontentloaded", timeout=30000)
+                    page.wait_for_timeout(1500)
                 if not frame:
-                    raise RuntimeError("上传 iframe 未找到(轮询20s仍缺失), 中止本文件上传")
+                    raise RuntimeError("上传 iframe 未找到(多次重试仍缺失), 中止本文件上传")
                 frame.wait_for_selector("#inp_fbtn", state="attached", timeout=10000)
                 frame.set_input_files("#inp_fbtn", pptx)
                 done = False
