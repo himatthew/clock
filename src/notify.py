@@ -174,8 +174,13 @@ def main():
     # 收件人: (发送用 token, to 参数)
     # 主: token=主, to=None(仅自己)
     # 好友: token=主, to=好友令牌  (PushPlus 好友推送走 to 参数, 见官方文档)
+    # ⚠️ 好友推送默认关闭: 之前每次通知都同时推给 主+好友1, 导致同一条结果在微信上收到多条相同消息
+    #    (用户反馈"连发三条相同的毛毛小主下发完毕")。如需让好友也收到, 在 .env 加
+    #    PUSHPLUS_PUSH_FRIEND=1 并保留 PUSHPLUS_FRIEND_TOKEN 即可重新开启。
     recipients = [(primary, None)]
-    if friend:
+    push_friend = (env.get("PUSHPLUS_PUSH_FRIEND", "")
+                   or os.environ.get("PUSHPLUS_PUSH_FRIEND", "")).strip().lower()
+    if friend and push_friend in ("1", "true", "yes"):
         recipients.append((primary, friend))
 
     def sec_ok(s):
