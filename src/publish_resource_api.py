@@ -236,7 +236,8 @@ def main():
             log(f"  {d:>12}  {t}  <-  {f}")
         return
 
-    assets_dir = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "data", "assets")
+    assets_dir = os.path.normpath(os.path.join(
+        os.path.dirname(os.path.abspath(__file__)), "..", "data", "assets"))
 
     # 构建上传目标列表 (src, fields, source, mode)
     targets = []
