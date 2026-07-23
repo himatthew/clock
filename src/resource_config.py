@@ -256,8 +256,14 @@ def make_resource_title(stem):
     if not re.match(r"^\d{4}-\d{2}-\d{2}_", stem):
         return stem
     parts = stem.split("_")
-    # 去掉开头 日期(2026-07-23) 与 纯数字时间(1904) 前缀段
-    while parts and (re.match(r"^\d{4}-\d{2}-\d{2}$", parts[0]) or re.match(r"^\d+$", parts[0])):
+    # 去掉开头的日期(YYYY-MM-DD)
+    if parts and re.match(r"^\d{4}-\d{2}-\d{2}$", parts[0]):
+        parts.pop(0)
+    # 去掉紧随其后的「时间前缀(HHMM, 恰好4位数字)」: 仅当它后面紧跟字母段(作者名)时才剥,
+    # 避免误吃曲名里形如 日期_年_月_日 的数字(如 2025_12_12_Erezim → 应保留「2025 12 12」)。
+    # 例: 2026-07-23_1904_Auerbach → 剥1904(后接Auerbach); 2026-08-07_2025_12_12_Erezim → 不剥(后接12)。
+    if (parts and re.match(r"^\d{4}$", parts[0])
+            and len(parts) > 1 and re.match(r"[A-Za-z]", parts[1])):
         parts.pop(0)
     if not parts:
         return stem
