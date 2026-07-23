@@ -211,10 +211,17 @@ def main():
         print(f"[话题] ({i}/{len(items)}) {title}")
         new_id = publish_topic_playwright(title, content)
         if not new_id:
-            print(f"[话题] ⚠️ 第{i}条 URL 未取到 id, 用标题回查")
-            r = s.get(f"{CONFIG['BASE']}/index.php?r=studio/topic/index&sid={CONFIG['SID']}", timeout=30)
-            m = re.search(r'(?:&|\?)id=(\d+)[^>]*>' + re.escape(title), r.text)
-            new_id = m.group(1) if m else None
+            # 标题回查: 翻页扫描话题列表(已存在话题可能不在第1页, 仅查第1页会误判"无法定位")
+            print(f"[话题] ⚠️ 第{i}条 URL 未取到 id, 用标题回查(翻页)")
+            for pg in range(1, 6):
+                url = f"{CONFIG['BASE']}/index.php?r=studio/topic/index&sid={CONFIG['SID']}"
+                if pg > 1:
+                    url += f"&page={pg}"
+                r = s.get(url, timeout=30)
+                m = re.search(r'(?:&|\?)id=(\d+)[^>]*>' + re.escape(title), r.text)
+                if m:
+                    new_id = m.group(1)
+                    break
         if new_id:
             new_ids.append(new_id)
             print(f"[话题] ✅ 第{i}条 新话题 id={new_id}")
