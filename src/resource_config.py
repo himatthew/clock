@@ -30,6 +30,7 @@ edition(教材目录) 不是页面选型列表——它是 hidden 字段, 由页
 """
 import json
 import os
+import re
 import datetime
 
 
@@ -242,9 +243,38 @@ def resolve_resource(config_path=None, override_date=None,
     )
 
 
+def make_resource_title(stem):
+    """把拆页/整本 PDF 文件名 stem 转成可读资源标题。
+
+    2026-07-23_1904_Auerbach_Otto_P005 -> 曲目《Auerbach Otto》 5
+    2026-07-23_1904_Auerbach_Otto       -> 曲目《Auerbach Otto》
+
+    规则: 仅当 stem 以 日期前缀(YYYY-MM-DD_) 开头才转换; 否则原样返回(避免误伤非曲目资源)。
+    去掉开头 日期 + 纯数字时间 前缀段; 中段(作者, 下划线转空格)放《》; 末段 P005 去掉 P 与
+    前导零得页码。无法解析时回退原 stem。
+    """
+    if not re.match(r"^\d{4}-\d{2}-\d{2}_", stem):
+        return stem
+    parts = stem.split("_")
+    # 去掉开头 日期(2026-07-23) 与 纯数字时间(1904) 前缀段
+    while parts and (re.match(r"^\d{4}-\d{2}-\d{2}$", parts[0]) or re.match(r"^\d+$", parts[0])):
+        parts.pop(0)
+    if not parts:
+        return stem
+    # 末段 P005 -> 页码(去 P 与前导零)
+    page = None
+    if re.match(r"^P0*\d+$", parts[-1]):
+        page = str(int(parts[-1][1:]))
+        parts.pop()
+    if not parts:
+        return stem
+    author = " ".join(parts)
+    return f"曲目《{author}》 {page}" if page else f"曲目《{author}》"
+
+
 def resolve_pdf_asset(pdf_path, title=None, intro=None):
     """assets/ 下已预处理改名(日期_原文件名)的 PDF 专用: parentId=综合资源,
-    title/intro = 文件名 stem(已含日期前缀)。
+    title/intro 默认由文件名 stem 解析为可读标题(如 曲目《Auerbach Otto》 5)。
 
     供 publish_resource_api.py / publish_resource_playwright.py 在「传入 assets/ 下 .pdf」
     或「批量上传当天日期前缀文件」时调用, 替代 resolve_resource()。
@@ -254,6 +284,6 @@ def resolve_pdf_asset(pdf_path, title=None, intro=None):
     fields = dict(DEFAULT_FIXED)
     fields["parentId"] = "综合资源"    # normalize 翻成真实 value 并同步 rtype
     fields["file"] = pdf_path
-    fields["title"] = title or stem
-    fields["intro"] = intro or (title or stem)
+    fields["title"] = title or make_resource_title(stem)
+    fields["intro"] = intro or fields["title"]
     return normalize_fields(fields), f"pdf-asset {stem}"
